@@ -1,11 +1,12 @@
 import os
+import json
 from pathlib import Path
 from typing import Optional, Tuple
 
 import gspread
 from google.oauth2.service_account import Credentials
 
-from .settings import BASE_DIR, GOOGLE_CREDS_PATH, SHEET_ID
+from .settings import SHEET_ID
 
 
 SCOPES = [
@@ -13,16 +14,34 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+# --- Credentials handling (local + Railway) ---
+CREDS_PATH = Path(
+    os.getenv("GOOGLE_CREDS_PATH", "/tmp/credentials.json")
+)
+
+_creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+
+if _creds_json:
+    try:
+        CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(CREDS_PATH, "w") as f:
+            json.dump(json.loads(_creds_json), f)
+    except Exception as e:
+        raise RuntimeError(f"❌ Error writing Google credentials from env: {e}")
+
 
 def _get_client() -> gspread.Client:
     """
     Devuelve un cliente autenticado de gspread.
+    Soporta credenciales locales o vía variable de entorno (Railway).
     """
-    if not GOOGLE_CREDS_PATH.exists():
-        raise FileNotFoundError(f"❌ No se encuentra credentials.json en {GOOGLE_CREDS_PATH}")
+    if not CREDS_PATH.exists():
+        raise FileNotFoundError(
+            f"❌ No se encuentra credentials.json en {CREDS_PATH}"
+        )
 
     creds = Credentials.from_service_account_file(
-        GOOGLE_CREDS_PATH,
+        CREDS_PATH,
         scopes=SCOPES,
     )
     return gspread.authorize(creds)
