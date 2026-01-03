@@ -299,26 +299,6 @@ h1 {
   padding: 0.4rem;
   font-size: 1rem;
 }
-
-.alert {
-  border-radius: 6px;
-  padding: 0.6rem;
-  margin-top: 0.6rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.alert-retraso {
-  background: #fff3cd;
-  border-left: 6px solid #ffc107;
-  color: #856404;
-}
-
-.alert-adelanto {
-  background: #e2f0ff;
-  border-left: 6px solid #0d6efd;
-  color: #084298;
-}
 </style>
 </head>
 
