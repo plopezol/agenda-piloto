@@ -398,8 +398,9 @@ async function cargarAgenda() {
   const url = fechaSeleccionada ? `/agenda?fecha=${fechaSeleccionada}` : '/agenda';
   const res = await fetch(url);
   const data = await res.json();
-  const avisosRes = await fetch(fechaSeleccionada ? `/agenda/avisos?fecha=${fechaSeleccionada}` : '/agenda/avisos');
-  const avisos = await avisosRes.json();
+  // const avisosRes = await fetch(fechaSeleccionada ? `/agenda/avisos?fecha=${fechaSeleccionada}` : '/agenda/avisos');
+  // const avisos = await avisosRes.json();
+  let avisos = [];
   const cont = document.getElementById('agenda');
   cont.innerHTML = '';
 
