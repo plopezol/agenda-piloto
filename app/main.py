@@ -281,7 +281,7 @@ h1 {
   background: white;
   max-width: 420px;
   width: 92%;
-  margin: 10% auto;
+  margin: auto;
   padding: 1rem;
   border-radius: 10px;
   box-shadow: 0 5px 20px rgba(0,0,0,0.25);
