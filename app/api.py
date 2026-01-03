@@ -10,6 +10,7 @@ from .services import (
     detectar_huecos,
     cambiar_avisada,
     mover_cita,
+    sugerir_clientas_para_hueco,
 )
 
 router = APIRouter()
@@ -118,5 +119,31 @@ def mover_cita_endpoint(
             row_destino=row_destino,
         )
         return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+@router.get("/agenda/hueco/sugeridas")
+def obtener_sugeridas_para_hueco(
+    row_sheet: int,
+    fecha: Optional[str] = Query(None, description="Fecha YYYY-MM-DD"),
+):
+    """
+    Devuelve las clientas flexibles que encajan en un hueco concreto.
+    """
+    try:
+        ws, _ = get_ws_dia(fecha)
+        agenda = leer_agenda(ws)
+
+        # Detectar huecos reales
+        huecos = detectar_huecos(ws)
+        hueco = next((h for h in huecos if h["row_sheet"] == row_sheet), None)
+
+        if not hueco:
+            return []
+
+        return sugerir_clientas_para_hueco(
+            agenda=agenda,
+            duracion_hueco=hueco["Duracion"],
+        )
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

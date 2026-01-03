@@ -154,8 +154,11 @@ def crear_cita(
 
 def detectar_huecos(ws) -> List[Dict[str, Any]]:
     """
-    Detecta huecos y devuelve huecos con su duración estimada.
-    Si un hueco tiene duración 0 en la hoja, se calcula hasta la siguiente cita.
+    Detecta huecos reales teniendo en cuenta:
+    - Hora de inicio
+    - Siguiente cita
+    - Duración real disponible
+    - Si el hueco permite servicios largos
     """
     agenda = leer_agenda(ws)
     if not agenda:
@@ -166,23 +169,36 @@ def detectar_huecos(ws) -> List[Dict[str, Any]]:
 
     huecos: List[Dict[str, Any]] = []
 
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         if row["Estado"] != "hueco":
             continue
 
         inicio = int(row["Hora_min"])
-        dur = int(row["Duración"]) if pd.notna(row["Duración"]) else 0
+        row_sheet = int(row["row_sheet"])
 
-        # Buscar siguiente cita (cualquier estado) para calcular duración real del hueco
-        siguientes = df[df["Hora_min"] > inicio]
+        # Buscar siguiente cita confirmada (ignorar otros huecos)
+        siguientes = df[
+            (df["Hora_min"] > inicio) &
+            (df["Estado"] != "hueco")
+        ]
+
         if not siguientes.empty:
-            fin = int(siguientes.iloc[0]["Hora_min"])
-            dur = max(0, fin - inicio)
+            siguiente = siguientes.iloc[0]
+            fin = int(siguiente["Hora_min"])
+            duracion_real = max(0, fin - inicio)
+        else:
+            # Si no hay siguiente cita, dejamos un máximo razonable (ej. 180 min)
+            duracion_real = 180
+
+        # Determinar si admite servicios largos
+        admite_largo = duracion_real >= 60
 
         huecos.append({
             "Hora": row["Hora"],
-            "Duracion": dur,
-            "row_sheet": int(row["row_sheet"]),
+            "Hora_min": inicio,
+            "Duracion": duracion_real,
+            "row_sheet": row_sheet,
+            "Admite_largo": admite_largo,
         })
 
     return huecos
@@ -237,3 +253,161 @@ def mover_cita(ws, row_origen: int, row_destino: int) -> None:
     ws.update_cell(row_origen, 6, DEFAULT_DURACION_MIN)
     ws.update_cell(row_origen, 7, DEFAULT_FLEXIBILIDAD)
     ws.update_cell(row_origen, 9, "No")
+def sugerir_clientas_para_hueco(
+    agenda: List[Dict[str, Any]],
+    duracion_hueco: int
+) -> List[Dict[str, Any]]:
+    """
+    Devuelve clientas compatibles con un hueco:
+    - Flexibilidad = Si
+    - Duración del servicio <= duración del hueco
+    - No avisadas
+    """
+    sugeridas = []
+
+    for row in agenda:
+        if row["Estado"] != "confirmada":
+            continue
+        if row["Flexibilidad"] != "Si":
+            continue
+        if row["Avisada"] == "Si":
+            continue
+        if row["Duración"] > duracion_hueco:
+            continue
+
+        sugeridas.append({
+            "Cliente": row["Cliente"],
+            "Telefono": row["Telefono"],
+            "Servicio": row["Servicio"],
+            "Duración": row["Duración"],
+            "row_sheet": row["row_sheet"],
+        })
+
+    return sugeridas
+
+
+# -------------------------
+# Detección de retrasos y adelantos (FASE 1)
+# -------------------------
+
+def detectar_retrasos_y_adelantos(
+    ws,
+    margen_adelanto: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    Detecta conflictos de tiempo en la agenda:
+    - Retrasos: una cita se come a la siguiente
+    - Adelantos: hay hueco suficiente antes de la siguiente cita
+    Devuelve una lista de avisos (no ejecuta acciones).
+    """
+    agenda = leer_agenda(ws)
+    if not agenda:
+        return []
+
+    df = pd.DataFrame(agenda)
+    df = df.sort_values("Hora_min")
+
+    avisos: List[Dict[str, Any]] = []
+
+    for i in range(len(df) - 1):
+        actual = df.iloc[i]
+        siguiente = df.iloc[i + 1]
+
+        # Solo analizamos citas confirmadas
+        if actual["Estado"] != "confirmada":
+            continue
+        if siguiente["Estado"] != "confirmada":
+            continue
+
+        inicio_actual = actual["Hora_min"]
+        duracion_actual = actual["Duración"]
+        fin_previsto = inicio_actual + duracion_actual
+
+        inicio_siguiente = siguiente["Hora_min"]
+
+        # Caso 1: Retraso
+        if fin_previsto > inicio_siguiente:
+            retraso = fin_previsto - inicio_siguiente
+            avisos.append({
+                "tipo": "retraso",
+                "minutos": retraso,
+                "afecta_a": {
+                    "Cliente": siguiente["Cliente"],
+                    "Telefono": siguiente["Telefono"],
+                    "row_sheet": siguiente["row_sheet"],
+                },
+                "causado_por": {
+                    "Cliente": actual["Cliente"],
+                    "Servicio": actual["Servicio"],
+                    "row_sheet": actual["row_sheet"],
+                }
+            })
+
+        # Caso 2: Adelanto posible
+        hueco = inicio_siguiente - fin_previsto
+        if hueco >= margen_adelanto:
+            avisos.append({
+                "tipo": "adelanto",
+                "minutos": hueco,
+                "posible_con": {
+                    "Cliente": siguiente["Cliente"],
+                    "Telefono": siguiente["Telefono"],
+                    "row_sheet": siguiente["row_sheet"],
+                },
+                "libre_desde": fin_previsto,
+            })
+
+    return avisos
+
+
+def aplicar_retraso_manual(
+    ws,
+    row_sheet: int,
+    minutos: int
+) -> None:
+    """
+    Aplica un retraso manual sumando minutos a la hora de una cita.
+    No reordena filas, solo ajusta la hora.
+    """
+    hora_actual = ws.cell(row_sheet, 1).value
+    hora_min = hora_a_minutos(hora_actual)
+
+    if hora_min < 0:
+        raise ValueError("Hora inválida")
+
+    nueva_hora = hora_min + minutos
+    horas = nueva_hora // 60
+    mins = nueva_hora % 60
+    hora_txt = f"{horas:02d}:{mins:02d}"
+
+    ws.update_cell(row_sheet, 1, hora_txt)
+    
+
+# -------------------------
+# Mensajes WhatsApp (FASE 1)
+# -------------------------
+
+def mensaje_hueco(
+    cliente: str,
+    fecha: str,
+    hora: str,
+    servicio: str
+) -> str:
+    """
+    Mensaje estándar para avisar de hueco libre.
+    No envía nada, solo devuelve el texto.
+    """
+    return (
+        f"Hola {cliente} 😊\n"
+        f"Se ha quedado un hueco libre el {fecha} a las {hora} "
+        f"para {servicio}.\n"
+        f"¿Te vendría bien?"
+    )
+
+def marcar_clientas_avisadas(ws, rows_sheet: list[int]) -> None:
+    """
+    Marca como 'Avisada = Si' varias filas de la agenda.
+    Se usa después de intentar avisar por WhatsApp.
+    """
+    for row in rows_sheet:
+        ws.update_cell(row, 9, "Si")

@@ -300,6 +300,25 @@ h1 {
   font-size: 1rem;
 }
 </style>
+  .alert {
+    border-radius: 6px;
+    padding: 0.6rem;
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .alert-retraso {
+    background: #fff3cd;
+    border-left: 6px solid #ffc107;
+    color: #856404;
+  }
+
+  .alert-adelanto {
+    background: #e2f0ff;
+    border-left: 6px solid #0d6efd;
+    color: #084298;
+  }
 </head>
 
 <body>
@@ -355,6 +374,23 @@ h1 {
 </div>
 
 <script>
+/* ====== ACCESO PROTEGIDO (LOPD BÁSICO) ====== */
+const AGENDA_PASSWORD = "010819"; // ⚠️ cambia esto por la contraseña que quieras
+const AUTH_KEY = "agenda_auth_ok";
+
+function checkAuth() {
+  if (localStorage.getItem(AUTH_KEY) === "true") return true;
+
+  const pass = prompt("🔒 Introduce la contraseña para acceder a la agenda:");
+  if (pass === AGENDA_PASSWORD) {
+    localStorage.setItem(AUTH_KEY, "true");
+    return true;
+  }
+  alert("❌ Contraseña incorrecta");
+  return false;
+}
+/* =========================================== */
+
 let mostrarHuecos = true;
 
 function toggleHuecos() {
@@ -377,9 +413,12 @@ function closeAllMenus() {
 }
 
 async function cargarAgenda() {
+  if (!checkAuth()) return;
   const url = fechaSeleccionada ? `/agenda?fecha=${fechaSeleccionada}` : '/agenda';
   const res = await fetch(url);
   const data = await res.json();
+  const avisosRes = await fetch(fechaSeleccionada ? `/agenda/avisos?fecha=${fechaSeleccionada}` : '/agenda/avisos');
+  const avisos = await avisosRes.json();
   const cont = document.getElementById('agenda');
   cont.innerHTML = '';
 
@@ -424,7 +463,7 @@ async function cargarAgenda() {
       actionsDiv.appendChild(whatsappBtn);
     }
 
-    // For hueco cards: only show Crear cita and Avisar clientas flexibles buttons
+// For hueco cards: only show Crear cita and Avisar clientas flexibles buttons
     if (estado === 'hueco') {
       // Crear cita button
       const crearBtn = document.createElement('button');
@@ -433,19 +472,11 @@ async function cargarAgenda() {
       crearBtn.onclick = () => abrirModal(row.row_sheet);
       actionsDiv.appendChild(crearBtn);
 
-      // Avisar clientas flexibles WhatsApp button
-      const fechaTxt = fechaSeleccionada || 'hoy';
-      const mensajeHueco =
-        `Hola 😊\nTenemos un hueco libre el ${fechaTxt} a las ${row.Hora}.\n` +
-        `Si te encaja, respóndenos a este mensaje.`;
-
-      const urlAvisar = `https://wa.me/?text=${encodeURIComponent(mensajeHueco)}`;
-      const avisarBtn = document.createElement('a');
-      avisarBtn.href = urlAvisar;
-      avisarBtn.target = '_blank';
-      avisarBtn.rel = 'noopener noreferrer';
+      // Nuevo botón: Avisar clientas flexibles
+      const avisarBtn = document.createElement('button');
       avisarBtn.innerHTML = '💬 Avisar clientas flexibles';
       avisarBtn.className = 'btn btn-whatsapp';
+      avisarBtn.onclick = () => avisarHuecoWhatsApp(row.row_sheet, row.Hora);
       actionsDiv.appendChild(avisarBtn);
 
       card.appendChild(actionsDiv);
@@ -543,6 +574,38 @@ async function cargarAgenda() {
       <span class="estado-badge estado-${estado}">${estado}</span>
       ${avisadaChip}
     `;
+
+    // Avisos de retraso / adelanto
+    const avisosRow = avisos.filter(a =>
+      (a.afecta_a && a.afecta_a.row_sheet === row.row_sheet) ||
+      (a.posible_con && a.posible_con.row_sheet === row.row_sheet)
+    );
+
+    avisosRow.forEach(a => {
+      const alert = document.createElement('div');
+      alert.className = 'alert ' + (a.tipo === 'retraso' ? 'alert-retraso' : 'alert-adelanto');
+
+      if (a.tipo === 'retraso') {
+        alert.innerHTML = `
+          ⚠️ Retraso estimado de <strong>${a.minutos} min</strong><br/>
+          <div class="flex-row">
+            <button class="btn btn-secondary btn-small" onclick="aplicarRetraso(${a.afecta_a.row_sheet}, 5)">+5</button>
+            <button class="btn btn-secondary btn-small" onclick="aplicarRetraso(${a.afecta_a.row_sheet}, 10)">+10</button>
+            <button class="btn btn-secondary btn-small" onclick="aplicarRetraso(${a.afecta_a.row_sheet}, 15)">+15</button>
+            <button class="btn btn-whatsapp btn-small"
+              onclick="avisarRetrasoWhatsApp(
+                '${row.Cliente || ''}',
+                '${row.Telefono || ''}',
+                ${a.minutos}
+              )">💬 Avisar</button>
+          </div>
+        `;
+      } else {
+        alert.innerHTML = `⏩ Adelanto posible de <strong>${a.minutos} min</strong>`;
+      }
+
+      card.appendChild(alert);
+    });
 
     card.appendChild(actionsDiv);
     cont.appendChild(card);
@@ -712,7 +775,90 @@ async function confirmarMover() {
   cargarAgenda();
 }
 
+// ======== WHATSAPP ASISTIDO PARA HUECOS ========
+async function avisarHuecoWhatsApp(rowSheet, horaHueco) {
+  const url = fechaSeleccionada
+    ? `/agenda/hueco/sugeridas?fecha=${fechaSeleccionada}&row_sheet=${rowSheet}`
+    : `/agenda/hueco/sugeridas?row_sheet=${rowSheet}`;
+
+  const res = await fetch(url);
+  const clientas = await res.json();
+
+  if (!clientas.length) {
+    alert("No hay clientas flexibles que encajen en este hueco.");
+    return;
+  }
+
+  const ok = confirm(
+    `Se va a avisar a ${clientas.length} clienta(s) por WhatsApp.\n\n¿Quieres continuar?`
+  );
+  if (!ok) return;
+
+  for (const c of clientas) {
+    if (!c.Telefono) continue;
+
+    const telefono = c.Telefono.replace(/\s+/g, '');
+    const mensaje =
+      `Hola ${c.Cliente || ''} 😊\n` +
+      `Se ha quedado un hueco libre el ${fechaSeleccionada || 'hoy'} a las ${horaHueco} ` +
+      `para ${c.Servicio}.\n¿Te vendría bien?`;
+
+    window.open(
+      `https://wa.me/${telefono}?text=${encodeURIComponent(mensaje)}`,
+      '_blank'
+    );
+
+    // Marcar como avisada
+    const urlAvisada = fechaSeleccionada
+      ? `/agenda/avisada?fecha=${fechaSeleccionada}&row_sheet=${c.row_sheet}&avisada=Si`
+      : `/agenda/avisada?row_sheet=${c.row_sheet}&avisada=Si`;
+
+    await fetch(urlAvisada, { method: 'POST' });
+  }
+}
+
+// ======== WHATSAPP ASISTIDO PARA RETRASOS ========
+function avisarRetrasoWhatsApp(cliente, telefono, minutos) {
+  if (!telefono) {
+    alert("No hay teléfono para esta clienta");
+    return;
+  }
+
+  const ok = confirm(
+    `Se va a avisar por WhatsApp de un retraso de ${minutos} minutos.\n\n¿Quieres continuar?`
+  );
+  if (!ok) return;
+
+  const telefonoLimpio = telefono.replace(/\s+/g, '');
+  const mensaje =
+    `Hola ${cliente || ''} 😊\n` +
+    `Vamos con un retraso aproximado de ${minutos} minutos.\n` +
+    `Gracias por tu paciencia 💙`;
+
+  const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
+  window.open(url, '_blank');
+}
+
+// ======== APLICAR RETRASO MANUAL ========
+async function aplicarRetraso(rowSheet, minutos) {
+  const baseUrl = fechaSeleccionada ? `/agenda/retraso?fecha=${fechaSeleccionada}` : '/agenda/retraso';
+  await fetch(baseUrl, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      row_sheet: rowSheet,
+      minutos: minutos
+    })
+  });
+  cargarAgenda();
+}
+
 window.onload = () => {
+  if (!checkAuth()) {
+    document.body.innerHTML = "<h2 style='text-align:center;margin-top:3rem;'>Acceso restringido</h2>";
+    return;
+  }
+
   const hoy = new Date().toISOString().slice(0,10);
   document.getElementById('fechaSelector').value = hoy;
   fechaSeleccionada = hoy;
