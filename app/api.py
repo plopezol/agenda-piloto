@@ -31,12 +31,15 @@ def obtener_agenda(fecha: Optional[str] = Query(None, description="Fecha YYYY-MM
 
 
 @router.post("/agenda/estado")
-def actualizar_estado(payload: EstadoUpdate):
+def actualizar_estado(
+    payload: EstadoUpdate,
+    fecha: Optional[str] = Query(None, description="Fecha YYYY-MM-DD"),
+):
     """
     Cambia el estado de una cita (confirmada / cancelada / hueco)
     """
     try:
-        ws, _ = get_ws_dia(payload.fecha)
+        ws, _ = get_ws_dia(fecha)
         cambiar_estado(
             ws=ws,
             row_sheet=payload.row_sheet,
