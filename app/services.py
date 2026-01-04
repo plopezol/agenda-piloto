@@ -25,15 +25,25 @@ from .settings import (
 # -------------------------
 
 def normaliza_estado(valor: str) -> str:
-    if not valor:
-        return "Hueco"
+    """Normaliza cualquier valor de estado a uno de: 'hueco' | 'confirmada' | 'cancelada'."""
+    if valor is None:
+        return "hueco"
     v = str(valor).strip().lower()
     if v in ("confirmada", "confirmado"):
-        return "Confirmada"
+        return "confirmada"
     if v in ("cancelada", "cancelado"):
+        return "cancelada"
+    if v in ("hueco", "vacío", "vacio", "", "-", "vacía", "vacia"):
+        return "hueco"
+    return "hueco"
+
+def estado_para_sheet(estado_norm: str) -> str:
+    """Convierte el estado normalizado a la etiqueta esperada en la hoja."""
+    estado_norm = normaliza_estado(estado_norm)
+    if estado_norm == "confirmada":
+        return "Confirmada"
+    if estado_norm == "cancelada":
         return "Cancelada"
-    if v in ("hueco", "vacío", "vacio"):
-        return "Hueco"
     return "Hueco"
 
 
@@ -111,7 +121,7 @@ def cambiar_estado(ws, row_sheet: int, estado: str) -> None:
     Cambia el estado de una fila concreta.
     """
     estado_norm = normaliza_estado(estado)
-    ws.update_cell(row_sheet, 2, estado_norm)
+    ws.update_cell(row_sheet, 2, estado_para_sheet(estado_norm))
 
 
 def crear_cita(
@@ -138,7 +148,7 @@ def crear_cita(
 
     # Solo forzar confirmada si era hueco
     if estado_actual == "hueco":
-        ws.update_cell(row_sheet, 2, "confirmada")
+        ws.update_cell(row_sheet, 2, "Confirmada")
 
     # Actualizar datos (C..G)
     ws.update_cell(row_sheet, 3, cliente)
@@ -237,7 +247,7 @@ def mover_cita(ws, row_origen: int, row_destino: int) -> None:
     avisada = ws.cell(row_origen, 9).value or "No"
 
     # Escribir en destino
-    ws.update_cell(row_destino, 2, "confirmada")
+    ws.update_cell(row_destino, 2, "Confirmada")
     ws.update_cell(row_destino, 3, cliente)
     ws.update_cell(row_destino, 4, telefono)
     ws.update_cell(row_destino, 5, servicio)
@@ -246,7 +256,7 @@ def mover_cita(ws, row_origen: int, row_destino: int) -> None:
     ws.update_cell(row_destino, 9, avisada)
 
     # Limpiar origen (dejar como hueco)
-    ws.update_cell(row_origen, 2, "hueco")
+    ws.update_cell(row_origen, 2, "Hueco")
     ws.update_cell(row_origen, 3, "")
     ws.update_cell(row_origen, 4, "")
     ws.update_cell(row_origen, 5, DEFAULT_SERVICIO)
