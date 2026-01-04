@@ -6,10 +6,6 @@ class EstadoUpdate(BaseModel):
     """
     Payload para cambiar el estado de una cita.
     """
-    fecha: Optional[str] = Field(
-        default=None,
-        description="Fecha en formato YYYY-MM-DD. Si es None, se usa hoy."
-    )
     row_sheet: int = Field(
         ...,
         description="Número de fila en Google Sheet (row_sheet)"
