@@ -26,15 +26,15 @@ from .settings import (
 
 def normaliza_estado(valor: str) -> str:
     if not valor:
-        return "hueco"
+        return "Hueco"
     v = str(valor).strip().lower()
     if v in ("confirmada", "confirmado"):
-        return "confirmada"
+        return "Confirmada"
     if v in ("cancelada", "cancelado"):
-        return "cancelada"
+        return "Cancelada"
     if v in ("hueco", "vacío", "vacio"):
-        return "hueco"
-    return "hueco"
+        return "Hueco"
+    return "Hueco"
 
 
 def duracion_a_minutos(valor) -> int:
